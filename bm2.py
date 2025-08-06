@@ -222,6 +222,24 @@ def others(m):
     elif m.text == "🔗 Referral":
         referral(m)
 
-# ✅ Start polling
-print("✅ Bot is running...")
-bot.infinity_polling()
+from flask import Flask, request
+import logging
+
+# ... (keep all existing code from line 2 to 251)
+
+# ✅ Webhook setup
+WEBHOOK_URL = f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME')}/{BOT_TOKEN}"
+bot.remove_webhook()
+bot.set_webhook(url=WEBHOOK_URL)
+
+app = Flask(__name__)
+
+@app.route(f'/{BOT_TOKEN}', methods=['POST'])
+def webhook():
+    json_str = request.get_data().decode('UTF-8')
+    update = telebot.types.Update.de_json(json_str)
+    bot.process_new_updates([update])
+    return '', 200
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.environ.get('PORT', 5000)))
