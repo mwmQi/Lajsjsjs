@@ -87,6 +87,8 @@ def check_joined(uid):
 # ✅ Start command
 @bot.message_handler(commands=['start'])
 def start(message):
+    if message.from_user.is_bot:
+        return
     uid = message.from_user.id
     init_user(uid)
 
@@ -96,7 +98,13 @@ def start(message):
         markup.add(types.InlineKeyboardButton("🔗 Join Group 2", url="https://t.me/+YP3uSVPdcJ0xYjM9"))
         markup.add(types.InlineKeyboardButton("🎬 Join Channel 3", url="https://t.me/+9Im8_gCDFq9jMDhl"))
         markup.add(types.InlineKeyboardButton("✅ Joined All - Verify", callback_data="verify"))
-        bot.send_message(uid, "🔒 Bot use karne ke liye sabhi channel/group join karo.", reply_markup=markup)
+        try:
+            bot.send_message(uid, "🔒 Bot use karne ke liye sabhi channel/group join karo.", reply_markup=markup)
+        except telebot.apihelper.ApiTelegramException as e:
+            if "bots can't send messages to bots" in str(e):
+                pass
+            else:
+                raise
         return
 
     main_menu(message)
