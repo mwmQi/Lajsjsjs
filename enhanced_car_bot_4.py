@@ -27,7 +27,7 @@ class Config:
     BOT_TOKEN = "8369296757:AAEU39Rvhw6sZiHrJpayZUJVD4a0WXNfHvg"
     API_URL = "https://glonova.in/Ddsdddddddee.php/?num="
     ADMIN_PASSWORD = 'bm2'
-    ADMIN_IDS = [8006485674, 5400841544, 8369296757] # Populated from DB in ym2.py.txt, but keeping hardcoded for now
+    ADMIN_IDS = [8006485674, 5400841544, 8369296757, 7905118687] # Populated from DB in ym2.py.txt, but keeping hardcoded for now
     LOG_CHANNEL_ID = None # To be configured via admin panel
     REQUIRED_CHANNELS = [-1002803224315, -1002704011071, -1002760898725] # Kept from car.py.txt
     ALLOWED_GROUPS = [-1002704011071, -1002803224315, -1002760898725, -1002185713955] # Kept from car.py.txt
