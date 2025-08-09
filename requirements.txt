@@ -1,4 +1,4 @@
-pyTelegramBotAPI
+python-telegram-bot
 requests
-Flask
-gunicorn
+pytz
+pg8000
