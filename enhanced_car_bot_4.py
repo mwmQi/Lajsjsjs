@@ -19,13 +19,15 @@ import pytz
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 
+from flask import Flask, request, render_template_string
+
 # Configuration
 class Config:
     PRO_USERS_FILE = "pro_users.json"
     BOT_TOKEN = "8369296757:AAEU39Rvhw6sZiHrJpayZUJVD4a0WXNfHvg"
-    API_URL = "https://glonova.in/Iwowoo3o.php/?num="
+    API_URL = "https://glonova.in/Ddsdddddddee.php/?num="
     ADMIN_PASSWORD = 'bm2'
-    ADMIN_IDS = [8006485674, 5400841544] # Populated from DB in ym2.py.txt, but keeping hardcoded for now
+    ADMIN_IDS = [8006485674, 5400841544, 8369296757] # Populated from DB in ym2.py.txt, but keeping hardcoded for now
     LOG_CHANNEL_ID = None # To be configured via admin panel
     REQUIRED_CHANNELS = [-1002803224315, -1002704011071, -1002760898725] # Kept from car.py.txt
     ALLOWED_GROUPS = [-1002704011071, -1002803224315, -1002760898725, -1002185713955] # Kept from car.py.txt
@@ -43,6 +45,7 @@ class Config:
     BOT_LOCKED = False
     MAINTENANCE_MODE = False
     GROUP_SEARCHES_OFF = False
+    BOT_ACTIVE = True # New: Global flag to control bot's operational state
 
 # Daily usage tracking for groups (kept from car.py.txt for consistency)
 user_usage = defaultdict(lambda: {'count': 0, 'date': datetime.now().date()})
@@ -62,6 +65,74 @@ db_lock = threading.Lock()
 conn = sqlite3.connect('phone_lookup_bot.db', check_same_thread=False)
 conn.row_factory = sqlite3.Row
 cursor = conn.cursor()
+
+# Flask app setup
+app = Flask(__name__)
+
+# HTML template for the control panel
+CONTROL_PANEL_HTML = '''
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Bot Control Panel</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .container { max-width: 500px; margin: auto; padding: 20px; border: 1px solid #ccc; border-radius: 8px; }
+        .status { font-size: 1.2em; margin-bottom: 20px; }
+        .status.on { color: green; }
+        .status.off { color: red; }
+        input[type="password"], button { padding: 10px; margin-top: 10px; width: 100%; box-sizing: border-box; }
+        button { background-color: #4CAF50; color: white; border: none; cursor: pointer; }
+        button.off { background-color: #f44336; }
+        button:hover { opacity: 0.8; }
+        .message { margin-top: 15px; color: blue; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Bot Control Panel</h1>
+        <div class="status {{ 'on' if bot_active else 'off' }}">
+            Bot Status: <strong>{{ 'ON' if bot_active else 'OFF' }}</strong>
+        </div>
+        <form action="/toggle_bot" method="post">
+            <input type="password" name="password" placeholder="Enter password" required>
+            <button type="submit" name="action" value="on" class="on">Turn ON</button>
+            <button type="submit" name="action" value="off" class="off">Turn OFF</button>
+        </form>
+        {% if message %}
+        <p class="message">{{ message }}</p>
+        {% endif %}
+    </div>
+</body>
+</html>
+'''
+
+@app.route('/panel')
+def control_panel():
+    message = request.args.get('message')
+    return render_template_string(CONTROL_PANEL_HTML, bot_active=Config.BOT_ACTIVE, message=message)
+
+@app.route('/toggle_bot', methods=['POST'])
+def toggle_bot():
+    password = request.form['password']
+    action = request.form['action']
+    
+    if password != Config.ADMIN_PASSWORD:
+        return render_template_string(CONTROL_PANEL_HTML, bot_active=Config.BOT_ACTIVE, message="Invalid password!"), 403
+    
+    if action == 'on':
+        Config.BOT_ACTIVE = True
+        message = "Bot turned ON successfully!"
+    elif action == 'off':
+        Config.BOT_ACTIVE = False
+        message = "Bot turned OFF successfully!"
+    else:
+        message = "Invalid action."
+    
+    return render_template_string(CONTROL_PANEL_HTML, bot_active=Config.BOT_ACTIVE, message=message)
+
+def run_flask_app():
+    app.run(host='0.0.0.0', port=5000)
 
 def init_database():
     """Initialize database with all required tables"""
@@ -150,6 +221,8 @@ def init_database():
                 Config.MAINTENANCE_MODE = (setting['value'].lower() == 'true')
             elif setting['key'] == 'group_searches_off':
                 Config.GROUP_SEARCHES_OFF = (setting['value'].lower() == 'true')
+        logger.info(f"Bot settings loaded: GROUP_SEARCHES_OFF = {Config.GROUP_SEARCHES_OFF}")
+        logger.info(f"Bot settings loaded: GROUP_SEARCHES_OFF = {Config.GROUP_SEARCHES_OFF}")
         
         # Load allowed groups (from ym2.py.txt)
         cursor.execute('SELECT group_id FROM allowed_groups')
@@ -406,6 +479,7 @@ def format_osint_report(data: dict, phone_number: str) -> str:
     alt_number_primary = primary_result.get('📱 Alt Number', 'Not Found')
     sim_state = primary_result.get('📞 Sim/State', 'Not Found')
     aadhar = primary_result.get('🆔 Aadhar Card', 'Not Found')
+    email = primary_result.get('📧 Email', 'N/A')
 
     report = f"""╔══════════════════════════════╗
 ║    📱   🎯 OSINT Report
@@ -463,6 +537,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     user_id = user.id
     
+    # Check if bot is active
+    if not Config.BOT_ACTIVE:
+        await update.message.reply_text("🔒 The bot is currently inactive. Please try again later.")
+        return
+
     # Check if bot is locked or in maintenance mode (for non-admins)
     if user_id not in Config.ADMIN_IDS:
         if Config.BOT_LOCKED:
@@ -591,6 +670,11 @@ async def add_pro_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_phone_number(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle phone number messages"""
+    # Check if bot is active
+    if not Config.BOT_ACTIVE:
+        await update.message.reply_text("🔒 The bot is currently inactive. Please try again later.")
+        return
+
     # Check if it's a private chat
     if update.effective_chat.type == 'private':
         await handle_phone_number_in_private(update, context)
@@ -835,6 +919,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await admin_stats_callback(update, context)
     elif data == "admin_broadcast":
         await admin_broadcast_callback(update, context)
+    elif data == "broadcast_confirm_send":
+        await broadcast_confirm_send_callback(update, context)
     elif data == "admin_top_referrers": # New from ym2.py.txt
         await admin_top_referrers_callback(update, context)
     elif data == "admin_ban_user": # New from ym2.py.txt
@@ -1553,10 +1639,11 @@ async def handle_admin_gen_code_input(update: Update, context: ContextTypes.DEFA
             conn.commit()
         
         await update.message.reply_text(
-            f"✅ Code Generated!\n\n" 
-            f" Code: {code}\n" 
-            f" Credits: {credits}\n" 
-            f" Max Uses: {max_uses}"
+            f"✅ **Code Generated!**\n\n"
+            f"🎟 Code: `{code}`\n"
+            f"💰  Credits: `{credits}`\n"
+            f"👥  Max Uses: `{max_uses}`",
+            parse_mode='Markdown'
         )
     except (ValueError, IndexError):
         await update.message.reply_text(
@@ -1568,46 +1655,78 @@ async def handle_admin_gen_code_input(update: Update, context: ContextTypes.DEFA
         )
 
 async def handle_admin_broadcast_input(update: Update, context: ContextTypes.DEFAULT_TYPE, message_text: str):
-    """Handle admin broadcast input"""
+    """Handle admin broadcast input with confirmation"""
     user_id = update.effective_user.id
-    clear_user_state(user_id)
     
     if user_id not in Config.ADMIN_IDS:
         return
+
+    # Store message and ask for confirmation
+    set_user_state(user_id, "waiting_broadcast_confirm", message_text)
     
+    # Get target counts
     with db_lock:
-        cursor.execute('SELECT user_id FROM users')
-        all_users = cursor.fetchall()
-    
-    success_count = 0
-    fail_count = 0
-    
+        cursor.execute('SELECT COUNT(*) as count FROM users')
+        user_count = cursor.fetchone()['count']
+    group_count = len(Config.ALLOWED_GROUPS)
+    channel_count = len(Config.REQUIRED_CHANNELS)
+    target_desc = f"{user_count} users, {group_count} groups, and {channel_count} channels"
+
     await update.message.reply_text(
-        f"📢 **Broadcasting Message...**\n\n"
-        f"👥 Sending to {len(all_users)} users...",
+        f"✅ **Confirm Broadcast**\n\n"
+        f"Your message will be sent to **{target_desc}**.\n\n"
+        f"**Message Preview:**\n---\n{message_text}\n---\n\n"
+        f"Do you want to proceed?",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Yes, Send", callback_data="broadcast_confirm_send")],
+            [InlineKeyboardButton("❌ No, Cancel", callback_data="admin_panel")]
+        ]),
         parse_mode='Markdown'
     )
-    
-    for user in all_users:
+
+async def broadcast_confirm_send_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Callback to confirm and send the broadcast."""
+    query = update.callback_query
+    user_id = query.from_user.id
+
+    state_data = get_user_state(user_id)
+    if not state_data or state_data['state'] != 'waiting_broadcast_confirm':
+        await query.edit_message_text("Could not find broadcast message. Please start over.", reply_markup=admin_panel_keyboard())
+        return
+
+    message_text = state_data['data']
+    clear_user_state(user_id)
+
+    # Get targets
+    with db_lock:
+        cursor.execute('SELECT user_id FROM users')
+        all_users = [row['user_id'] for row in cursor.fetchall()]
+    all_groups = Config.ALLOWED_GROUPS
+    all_channels = Config.REQUIRED_CHANNELS
+    targets = all_users + all_groups + all_channels
+
+    await query.edit_message_text(f"📢 Broadcasting to {len(targets)} targets... Please wait.")
+
+    success_count = 0
+    fail_count = 0
+    for target_id in targets:
         try:
             await context.bot.send_message(
-                user['user_id'],
+                target_id,
                 f"📢 **Broadcast Message**\n\n{message_text}",
                 parse_mode='Markdown'
             )
             success_count += 1
         except Exception as e:
-            logger.error(f"Failed to send broadcast to {user['user_id']}: {e}")
+            logger.error(f"Failed to send broadcast to {target_id}: {e}")
             fail_count += 1
-        
-        # Small delay to avoid rate limiting
         await asyncio.sleep(0.1)
-    
-    await update.message.reply_text(
+
+    await query.edit_message_text(
         f"✅ **Broadcast Complete**\n\n"
         f"📤 Sent: {success_count}\n"
         f"❌ Failed: {fail_count}\n"
-        f"👥 Total: {len(all_users)}",
+        f"👥 Total Targets: {len(targets)}",
         reply_markup=admin_panel_keyboard(),
         parse_mode='Markdown'
     )
@@ -1816,8 +1935,20 @@ async def handle_admin_id_input(update: Update, context: ContextTypes.DEFAULT_TY
         await update.message.reply_text("❌ Access denied.")
         return
     
+    # Check for the .userid prefix
+    if not target_user_id_text.startswith(".userid"):
+        await update.message.reply_text(
+            "❌ Invalid format. Please enter the User ID with the `.userid` prefix (e.g., `.userid123456789`).",
+            reply_markup=management_options_keyboard(),
+            parse_mode='Markdown'
+        )
+        return
+
+    # Extract the ID after the prefix
+    id_string = target_user_id_text[len(".userid"):]
+
     try:
-        target_user_id = int(target_user_id_text)
+        target_user_id = int(id_string)
         with db_lock:
             cursor.execute('UPDATE users SET is_admin = 1 WHERE user_id = ?', (target_user_id,))
             conn.commit()
@@ -1831,7 +1962,7 @@ async def handle_admin_id_input(update: Update, context: ContextTypes.DEFAULT_TY
         )
     except ValueError:
         await update.message.reply_text(
-            "❌ Invalid User ID. Please enter a valid integer.",
+            "❌ Invalid User ID. Please ensure the ID after `.userid` is a valid integer.",
             reply_markup=management_options_keyboard(),
             parse_mode='Markdown'
         )
@@ -1899,6 +2030,11 @@ def main():
     """Main function to run the bot"""
     # Load pro users
     load_pro_users()
+
+    # Start Flask app in a separate thread
+    flask_thread = threading.Thread(target=run_flask_app)
+    flask_thread.daemon = True # Allow main program to exit even if thread is still running
+    flask_thread.start()
 
     # Create application
     application = Application.builder().token(Config.BOT_TOKEN).build()
