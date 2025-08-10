@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: Opus
+    env: python
+    plan: free
+    buildCommand: pip3 install --no-cache-dir --upgrade --requirement requirements.txt
+    startCommand: python enhanced_car_bot_4.py
