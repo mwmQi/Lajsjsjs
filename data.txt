@@ -1,0 +1,36 @@
+{
+    "BOT_TOKEN": "7267756480:AAFIuAYmxwSBV2W2kRxdi9Nqqdcrqpn7Wzg",
+    "API_URL": "https://glonova.in/Ddsdddddddee.php/?num=",
+    "VEHICLE_API_URL": "https://glonova.in/RannKxi.php/?vc=",
+    "ADMIN_PASSWORD": "bm2",
+    "ADMIN_IDS": [
+        8006485674,
+        5400841544,
+        8369296757,
+        7905118687
+    ],
+    "LOG_CHANNEL_ID": null,
+    "REQUIRED_CHANNELS": [
+        -1002803224315,
+        -1002704011071,
+        -1002760898725
+    ],
+    "ALLOWED_GROUPS": [
+        -1002704011071,
+        -1002803224315,
+        -1002760898725,
+        -1002185713955
+    ],
+    "CHANNEL_LINKS": [
+        "https://t.me/RAJPUT996633uswjjddj",
+        "https://t.me/+8OCGipDrQm00Yzdl",
+        "https://t.me/+r42jKd8ody4zYTM1"
+    ],
+    "DAILY_FREE_SEARCHES": 3,
+    "PRIVATE_SEARCH_COST": 1,
+    "REFERRAL_BONUS": 0.5,
+    "BOT_LOCKED": false,
+    "MAINTENANCE_MODE": false,
+    "GROUP_SEARCHES_OFF": false,
+    "BOT_ACTIVE": true
+}

@@ -15,43 +15,100 @@ import threading
 from datetime import datetime, timedelta
 from collections import defaultdict
 import pytz
+from functools import wraps
+
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 
 from flask import Flask, request, render_template_string
 
+# --- Path Configuration ---
+# Get the absolute path of the directory where the script is located
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_FILE = os.path.join(SCRIPT_DIR, 'phone_lookup_bot.db')
+# --- End Path Configuration ---
+
 # Configuration
 class Config:
-    PRO_USERS_FILE = "pro_users.json"
-    BOT_TOKEN = "8369296757:AAEU39Rvhw6sZiHrJpayZUJVD4a0WXNfHvg"
-    API_URL = "https://glonova.in/Ddsdddddddee.php/?num="
-    ADMIN_PASSWORD = 'bm2'
-    ADMIN_IDS = [8006485674, 5400841544, 8369296757, 7905118687] # Populated from DB in ym2.py.txt, but keeping hardcoded for now
-    LOG_CHANNEL_ID = None # To be configured via admin panel
-    REQUIRED_CHANNELS = [-1002803224315, -1002704011071, -1002760898725] # Kept from car.py.txt
-    ALLOWED_GROUPS = [-1002704011071, -1002803224315, -1002760898725, -1002185713955] # Kept from car.py.txt
-    CHANNEL_LINKS = ["https://t.me/RAJPUT996633uswjjddj", "https://t.me/+8OCGipDrQm00Yzdl", "https://t.me/+r42jKd8ody4zYTM1"]
+    BOT_TOKEN = "" # Loaded from data.txt
+    API_URL = "" # Loaded from data.txt
+    VEHICLE_API_URL = "" # Loaded from data.txt
+    ADMIN_PASSWORD = '' # Loaded from data.txt
+    ADMIN_IDS = [] # Loaded from data.txt
+    LOG_CHANNEL_ID = None # Loaded from data.txt
+    REQUIRED_CHANNELS = [] # Loaded from data.txt
+    ALLOWED_GROUPS = [] # Loaded from data.txt
+    CHANNEL_LINKS = [] # Loaded from data.txt
     
     # Default Limits
-    DAILY_FREE_SEARCHES = 3
-    PRIVATE_SEARCH_COST = 1
-    REFERRAL_BONUS = 0.5
+    DAILY_FREE_SEARCHES = 0 # Loaded from data.txt
+    PRIVATE_SEARCH_COST = 0.0 # Loaded from data.txt
+    REFERRAL_BONUS = 0.0 # Loaded from data.txt
     
     # Timezone
     TIMEZONE = pytz.timezone('Asia/Kolkata')  # GMT+5:30
     
     # Runtime settings
-    BOT_LOCKED = False
-    MAINTENANCE_MODE = False
-    GROUP_SEARCHES_OFF = False
-    BOT_ACTIVE = True # New: Global flag to control bot's operational state
+    BOT_LOCKED = False # Loaded from data.txt
+    MAINTENANCE_MODE = False # Loaded from data.txt
+    GROUP_SEARCHES_OFF = False # Loaded from data.txt
+    BOT_ACTIVE = True # Loaded from data.txt
 
-# Daily usage tracking for groups (kept from car.py.txt for consistency)
-user_usage = defaultdict(lambda: {'count': 0, 'date': datetime.now().date()})
+SETTINGS_FILE = os.path.join(SCRIPT_DIR, 'data.txt')
 
-# Pro users with unlimited access (kept from 555.py)
-pro_users = set()
+def load_settings():
+    try:
+        with open(SETTINGS_FILE, 'r') as f:
+            settings = json.load(f)
+            Config.BOT_TOKEN = settings.get('BOT_TOKEN', "8369296757:AAEU39Rvhw6sZiHrJpayZUJVD4a0WXNfHvg") # Default if not in file
+            Config.API_URL = settings.get('API_URL', "https://glonova.in/Ddsdddddddee.php/?num=")
+            Config.VEHICLE_API_URL = settings.get('VEHICLE_API_URL', "https://glonova.in/RannKxi.php/?vc=")
+            Config.ADMIN_PASSWORD = settings.get('ADMIN_PASSWORD', 'bm2')
+            Config.ADMIN_IDS = settings.get('ADMIN_IDS', [8006485674, 5400841544, 8369296757, 7905118687])
+            Config.LOG_CHANNEL_ID = settings.get('LOG_CHANNEL_ID', None)
+            Config.REQUIRED_CHANNELS = settings.get('REQUIRED_CHANNELS', [-1002803224315, -1002704011071, -1002760898725])
+            Config.ALLOWED_GROUPS = settings.get('ALLOWED_GROUPS', [-1002704011071, -1002803224315, -1002760898725, -1002185713955])
+            Config.CHANNEL_LINKS = settings.get('CHANNEL_LINKS', ["https://t.me/RAJPUT996633uswjjddj", "https://t.me/+8OCGipDrQm00Yzdl", "https://t.me/+r42jKd8ody4zYTM1"])
+            Config.DAILY_FREE_SEARCHES = settings.get('DAILY_FREE_SEARCHES', 3)
+            Config.PRIVATE_SEARCH_COST = settings.get('PRIVATE_SEARCH_COST', 1)
+            Config.REFERRAL_BONUS = settings.get('REFERRAL_BONUS', 0.5)
+            Config.BOT_LOCKED = settings.get('BOT_LOCKED', False)
+            Config.MAINTENANCE_MODE = settings.get('MAINTENANCE_MODE', False)
+            Config.GROUP_SEARCHES_OFF = settings.get('GROUP_SEARCHES_OFF', False)
+            Config.BOT_ACTIVE = settings.get('BOT_ACTIVE', True)
+            logger.info("Settings loaded from data.txt")
+    except FileNotFoundError:
+        logger.warning("data.txt not found. Creating with default settings.")
+        save_settings() # Create default data.txt
+    except json.JSONDecodeError:
+        logger.error("Error decoding data.txt. Overwriting with default settings.")
+        save_settings() # Overwrite corrupted data.txt
+
+def save_settings():
+    settings = {
+        'BOT_TOKEN': Config.BOT_TOKEN,
+        'API_URL': Config.API_URL,
+        'VEHICLE_API_URL': Config.VEHICLE_API_URL,
+        'ADMIN_PASSWORD': Config.ADMIN_PASSWORD,
+        'ADMIN_IDS': list(Config.ADMIN_IDS), # Convert set to list for JSON
+        'LOG_CHANNEL_ID': Config.LOG_CHANNEL_ID,
+        'REQUIRED_CHANNELS': Config.REQUIRED_CHANNELS,
+        'ALLOWED_GROUPS': Config.ALLOWED_GROUPS,
+        'CHANNEL_LINKS': Config.CHANNEL_LINKS,
+        'DAILY_FREE_SEARCHES': Config.DAILY_FREE_SEARCHES,
+        'PRIVATE_SEARCH_COST': Config.PRIVATE_SEARCH_COST,
+        'REFERRAL_BONUS': Config.REFERRAL_BONUS,
+        'BOT_LOCKED': Config.BOT_LOCKED,
+        'MAINTENANCE_MODE': Config.MAINTENANCE_MODE,
+        'GROUP_SEARCHES_OFF': Config.GROUP_SEARCHES_OFF,
+        'BOT_ACTIVE': Config.BOT_ACTIVE,
+    }
+    with open(SETTINGS_FILE, 'w') as f:
+        json.dump(settings, f, indent=4)
+    logger.info("Settings saved to data.txt")
+
+# Daily usage tracking for groups is now handled in the database.
 
 # Setup logging
 logging.basicConfig(
@@ -62,7 +119,7 @@ logger = logging.getLogger(__name__)
 
 # Database setup
 db_lock = threading.Lock()
-conn = sqlite3.connect('phone_lookup_bot.db', check_same_thread=False)
+conn = sqlite3.connect(DB_FILE, check_same_thread=False)
 conn.row_factory = sqlite3.Row
 cursor = conn.cursor()
 
@@ -128,6 +185,12 @@ def toggle_bot():
         message = "Bot turned OFF successfully!"
     else:
         message = "Invalid action."
+    
+    if action in ['on', 'off']:
+        with db_lock:
+            cursor.execute('INSERT OR REPLACE INTO bot_settings (key, value) VALUES (?, ?)',
+                          ('bot_active', str(Config.BOT_ACTIVE)))
+            conn.commit()
     
     return render_template_string(CONTROL_PANEL_HTML, bot_active=Config.BOT_ACTIVE, message=message)
 
@@ -221,7 +284,8 @@ def init_database():
                 Config.MAINTENANCE_MODE = (setting['value'].lower() == 'true')
             elif setting['key'] == 'group_searches_off':
                 Config.GROUP_SEARCHES_OFF = (setting['value'].lower() == 'true')
-        logger.info(f"Bot settings loaded: GROUP_SEARCHES_OFF = {Config.GROUP_SEARCHES_OFF}")
+            elif setting['key'] == 'bot_active':
+                Config.BOT_ACTIVE = (setting['value'].lower() == 'true')
         logger.info(f"Bot settings loaded: GROUP_SEARCHES_OFF = {Config.GROUP_SEARCHES_OFF}")
         
         # Load allowed groups (from ym2.py.txt)
@@ -243,20 +307,6 @@ def init_database():
             Config.ADMIN_IDS = db_admin_ids
 
 init_database()
-
-def load_pro_users():
-    """Load pro users from file"""
-    global pro_users
-    try:
-        with open(Config.PRO_USERS_FILE, 'r') as f:
-            pro_users = set(json.load(f))
-    except FileNotFoundError:
-        pro_users = set()
-
-def save_pro_users():
-    """Save pro users to file"""
-    with open(Config.PRO_USERS_FILE, 'w') as f:
-        json.dump(list(pro_users), f)
 
 def generate_referral_code(user_id: int) -> str:
     """Generate unique referral code"""
@@ -328,6 +378,26 @@ def clear_user_state(user_id: int):
         cursor.execute('DELETE FROM user_states WHERE user_id = ?', (user_id,))
         conn.commit()
 
+def callback_membership_required(func):
+    """Decorator for callback handlers to check channel membership."""
+    @wraps(func)
+    async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
+        query = update.callback_query
+        user_id = query.from_user.id
+
+        if not await check_channel_membership(context, user_id):
+            keyboard = create_join_keyboard()
+            await query.edit_message_text(
+                "🔒 **Channel Membership Required**\n\n"
+                "Please join all required channels to use this bot:",
+                reply_markup=keyboard,
+                parse_mode='Markdown'
+            )
+            return
+        return await func(update, context, *args, **kwargs)
+    return wrapper
+
+
 async def check_channel_membership(context: ContextTypes.DEFAULT_TYPE, user_id: int) -> bool:
     """Check if user is member of all required channels (from car.py.txt)"""
     for channel in Config.REQUIRED_CHANNELS:
@@ -361,7 +431,17 @@ def main_menu_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🔑 Redeem Code", callback_data="redeem_code"),
          InlineKeyboardButton("🔗 Invite Friends", callback_data="refer_friends")],
         [InlineKeyboardButton("💡 How It Works", callback_data="how_it_works"),
-         InlineKeyboardButton("📈 My Usage", callback_data="my_stats")]
+         InlineKeyboardButton("📈 My Usage", callback_data="my_stats")],
+        [InlineKeyboardButton("📞 Contact Owner", url="https://t.me/HIDANCODE")]
+    ])
+    return keyboard
+
+def lookup_menu_keyboard() -> InlineKeyboardMarkup:
+    """Keyboard for choosing lookup type."""
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📱 Number Lookup", callback_data="lookup_phone"),
+         InlineKeyboardButton("🚗 Vehicle Lookup", callback_data="lookup_vehicle")],
+        [InlineKeyboardButton("🔙 Back", callback_data="main_menu")]
     ])
     return keyboard
 
@@ -428,30 +508,22 @@ def ban_unban_keyboard() -> InlineKeyboardMarkup:
     return keyboard
 
 def check_daily_usage_group(user_id: int) -> bool:
-    """Check if user has exceeded daily limit in groups (from car.py.txt)"""
-    if user_id in pro_users:
-        return True
-    today = datetime.now().date()
-    user_data = user_usage[user_id]
-    
-    # Reset count if it's a new day
-    if user_data['date'] != today:
-        user_data['count'] = 0
-        user_data['date'] = today
-    
-    return user_data['count'] < Config.DAILY_FREE_SEARCHES
+    """Check if user has exceeded daily limit in groups from the database."""
+    # The daily reset is handled by check_daily_reset() which is called before this.
+    with db_lock:
+        cursor.execute('SELECT daily_searches FROM users WHERE user_id = ?', (user_id,))
+        user = cursor.fetchone()
+        if user:
+            return user['daily_searches'] < Config.DAILY_FREE_SEARCHES
+    return False # Failsafe
 
-def increment_usage_group(user_id: int):
-    """Increment user's daily usage count for group searches (from car.py.txt)"""
-    if user_id not in pro_users:
-        user_usage[user_id]['count'] += 1
+
 
 def increment_group_usage_db(user_id: int):
     """Increment user's daily usage count for group searches in database (from 555.py)"""
-    if user_id not in pro_users:
-        with db_lock:
-            cursor.execute('UPDATE users SET daily_searches = daily_searches + 1 WHERE user_id = ?', (user_id,))
-            conn.commit()
+    with db_lock:
+        cursor.execute('UPDATE users SET daily_searches = daily_searches + 1 WHERE user_id = ?', (user_id,))
+        conn.commit()
 
 async def fetch_osint_data(phone_number: str) -> dict:
     """Fetch OSINT data from API"""
@@ -464,6 +536,20 @@ async def fetch_osint_data(phone_number: str) -> dict:
             return None
     except Exception as e:
         logger.error(f"API request exception: {e}")
+        return None
+
+async def fetch_vehicle_data(vehicle_number: str) -> dict:
+    """Fetch Vehicle data from API"""
+    try:
+        url = f"{Config.VEHICLE_API_URL}{vehicle_number}"
+        response = requests.get(url, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            logger.error(f"Vehicle API request failed for {vehicle_number} with status code: {response.status_code}")
+            return None
+    except Exception as e:
+        logger.error(f"Vehicle API request exception for {vehicle_number}: {e}")
         return None
 
 def format_osint_report(data: dict, phone_number: str) -> str:
@@ -526,6 +612,51 @@ def format_osint_report(data: dict, phone_number: str) -> str:
   └ 🆔 Aadhar Card: {alt_aadhar}"""
 
     report += f"""
+
+🔍 Report Generated: {datetime.now(Config.TIMEZONE).strftime('%Y-%m-%d %H:%M:%S')}
+⚠️ For Educational Purposes Only"""
+
+    return report
+
+def format_vehicle_report(data: dict, vehicle_number: str) -> str:
+    """Format vehicle data into a readable report."""
+    if not data or data.get("status") != 0 or not data.get("data") or not data['data'].get('result'):
+        return f"❌ No valid data found for vehicle number: {vehicle_number}"
+
+    res = data['data']['result']
+
+    report = f"""╔══════════════════════════════╗
+║    🚗   🎯 Vehicle Report
+╚══════════════════════════════╝
+🔍 Searched Number: {res.get('regNo', 'N/A')}
+
+┏━━━━━━━━━━━━━━━━━━━━━━━┓
+┃  👤 OWNER INFORMATION   ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━┛
+👤 Owner Name: {res.get('owner', 'N/A')}
+👨‍👦 Father's Name: {res.get('ownerFatherName', 'N/A')}
+🏠 Address: {res.get('presentAddress', 'N/A')}
+
+┏━━━━━━━━━━━━━━━━━━━━━━━┓
+┃  📋 VEHICLE DETAILS     ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━┛
+🏭 Manufacturer: {res.get('vehicleManufacturerName', 'N/A')}
+🚘 Model: {res.get('model', 'N/A')}
+⛽ Fuel Type: {res.get('type', 'N/A')}
+🏍️ Class: {res.get('class', 'N/A')}
+🎨 Colour: {res.get('vehicleColour', 'N/A')}
+📅 Registration Date: {res.get('regDate', 'N/A')}
+🗓️ RC Expiry: {res.get('rcExpiryDate', 'N/A')}
+Engine No: {res.get('engine', 'N/A')}
+Chassis No: {res.get('chassis', 'N/A')}
+
+┏━━━━━━━━━━━━━━━━━━━━━━━┓
+┃  📄 OTHER INFORMATION    ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━┛
+🏦 Financer: {res.get('rcFinancer', 'N/A')}
+🛡️ Insurance Upto: {res.get('vehicleInsuranceUpto', 'N/A')}
+PUCC Upto: {res.get('puccUpto', 'N/A')}
+RTO: {res.get('regAuthority', 'N/A')}
 
 🔍 Report Generated: {datetime.now(Config.TIMEZONE).strftime('%Y-%m-%d %H:%M:%S')}
 ⚠️ For Educational Purposes Only"""
@@ -600,11 +731,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     elif update.effective_chat.id in Config.ALLOWED_GROUPS:
         await update.message.reply_text(
-            "🤖 **OSINT Phone Lookup Bot**\n\n"
-            "📱 Send a 10-digit phone number to get OSINT report\n"
-            f"⏰ Limit: {Config.DAILY_FREE_SEARCHES} searches per day\n"
-            "🔒 Channel membership required\n\n"
-            "Example: `9876543210`",
+            "🤖 **OSINT Phone Lookup Bot**\n\n" \
+            "Send a 10-digit phone number or a vehicle number (e.g., `.JH01CW0229`) to get a report.\n" \
+            f"⏰ Limit: {Config.DAILY_FREE_SEARCHES} searches per day\n" \
+            "🔒 Channel membership required\n\n" \
+            "Example: `9876543210` or `.MH01AB1234`",
             parse_mode='Markdown'
         )
     else:
@@ -649,24 +780,7 @@ async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode='Markdown'
     )
 
-async def add_pro_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Add a user to the pro list for unlimited searches"""
-    user_id = update.effective_user.id
-    if user_id not in Config.ADMIN_IDS:
-        await update.message.reply_text("❌ You are not authorized to use this command.")
-        return
 
-    if not context.args:
-        await update.message.reply_text("Usage: /bm2 [user_id]")
-        return
-
-    try:
-        pro_user_id = int(context.args[0])
-        pro_users.add(pro_user_id)
-        save_pro_users()
-        await update.message.reply_text(f"✅ User {pro_user_id} has been granted unlimited access.")
-    except ValueError:
-        await update.message.reply_text("Invalid user ID.")
 
 async def handle_phone_number(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle phone number messages"""
@@ -751,7 +865,6 @@ async def handle_phone_number(update: Update, context: ContextTypes.DEFAULT_TYPE
         report = format_osint_report(osint_data, message_text)
         
         # Increment usage count
-        increment_usage_group(user_id)
         increment_group_usage_db(user_id)
         
         # Log search
@@ -770,8 +883,11 @@ async def handle_phone_number(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         
         # Send usage info
-        if user_id not in pro_users:
-            remaining = Config.DAILY_FREE_SEARCHES - user_usage[user_id]['count']
+        with db_lock:
+            cursor.execute('SELECT daily_searches FROM users WHERE user_id = ?', (user_id,))
+            db_user = cursor.fetchone()
+        if db_user:
+            remaining = Config.DAILY_FREE_SEARCHES - db_user['daily_searches']
             await update.message.reply_text(
                 f"✅ **Search Complete**\n"
                 f"📊 Remaining searches today: {remaining}/{Config.DAILY_FREE_SEARCHES}",
@@ -809,7 +925,7 @@ async def handle_phone_number_in_private(update: Update, context: ContextTypes.D
         return
     
     # Check if user has enough credits
-    if user_data['credits'] < Config.PRIVATE_SEARCH_COST and user_id not in pro_users:
+    if user_data['credits'] < Config.PRIVATE_SEARCH_COST:
         await update.message.reply_text(
             f"❌ **Insufficient Credits**\n\n"
             f"💰 Required: {Config.PRIVATE_SEARCH_COST} credits\n"
@@ -835,11 +951,10 @@ async def handle_phone_number_in_private(update: Update, context: ContextTypes.D
     osint_data = await fetch_osint_data(message_text)
     
     if osint_data:
-        # Deduct credits (if not pro user)
-        if user_id not in pro_users:
-            with db_lock:
-                cursor.execute('UPDATE users SET credits = credits - ? WHERE user_id = ?', (Config.PRIVATE_SEARCH_COST, user_id))
-                conn.commit()
+        # Deduct credits
+        with db_lock:
+            cursor.execute('UPDATE users SET credits = credits - ? WHERE user_id = ?', (Config.PRIVATE_SEARCH_COST, user_id))
+            conn.commit()
         
         # Log search
         with db_lock:
@@ -860,18 +975,113 @@ async def handle_phone_number_in_private(update: Update, context: ContextTypes.D
         )
         
         # Send updated credit info
-        if user_id not in pro_users:
+        updated_user = get_or_create_user(user_id)
+        await update.message.reply_text(
+            f"✅ **Search Complete**\n"
+            f"💰 Remaining credits: {updated_user['credits']}",
+            parse_mode='Markdown'
+        )
+    else:
+        await processing_msg.edit_text(
+            "❌ **Search Failed**\n"
+            "No data found for this number or API error occurred.\n"
+            "Please try again later.",
+            parse_mode='Markdown'
+        )
+
+
+async def handle_vehicle_number(update: Update, context: ContextTypes.DEFAULT_TYPE, vehicle_number: str):
+    """Handle vehicle number messages"""
+    if not Config.BOT_ACTIVE:
+        await update.message.reply_text("🔒 The bot is currently inactive. Please try again later.")
+        return
+
+    user_id = update.effective_user.id
+    get_or_create_user(user_id, update.effective_user.username, update.effective_user.first_name)
+
+    # Membership check
+    if not await check_channel_membership(context, user_id):
+        keyboard = create_join_keyboard()
+        await update.message.reply_text(
+            "🔒 **Channel Membership Required**\n\nPlease join all required channels to use this bot:",
+            reply_markup=keyboard, parse_mode='Markdown'
+        )
+        return
+
+    # Private chat: check credits
+    if update.effective_chat.type == 'private':
+        user_data = get_or_create_user(user_id)
+        if user_data['credits'] < Config.PRIVATE_SEARCH_COST:
+            await update.message.reply_text(
+                f"❌ **Insufficient Credits for Vehicle Search**\n\n" 
+                f"💰 Required: {Config.PRIVATE_SEARCH_COST} credits",
+                parse_mode='Markdown'
+            )
+            return
+    # Group chat: check daily limit
+    elif update.effective_chat.id in Config.ALLOWED_GROUPS:
+        if Config.GROUP_SEARCHES_OFF:
+            await update.message.reply_text(
+                f"🔒 Group searches are currently locked. Please use the bot in DM for searches.\n" 
+                f"Click here to start a private chat: @{context.bot.username}",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Start Private Chat", url=f"https://t.me/{context.bot.username}")]])
+            )
+            return
+
+        if not check_daily_usage_group(user_id):
+            await update.message.reply_text("⚠️ Daily limit exceeded!")
+            return
+    else: # Unauthorized group
+        await update.message.reply_text("❌ Unauthorized group!")
+        return
+
+    processing_msg = await update.message.reply_text(
+        f"🔍 **Searching Vehicle Data...**\n"
+        f"Vehicle No: `{vehicle_number}`\n"
+        f"⏳ Please wait...",
+        parse_mode='Markdown'
+    )
+
+    vehicle_data = await fetch_vehicle_data(vehicle_number)
+
+    if vehicle_data:
+        report = format_vehicle_report(vehicle_data, vehicle_number)
+        
+        await processing_msg.delete()
+
+        if update.effective_chat.type == 'private':
+            with db_lock:
+                cursor.execute('UPDATE users SET credits = credits - ? WHERE user_id = ?', (Config.PRIVATE_SEARCH_COST, user_id))
+                conn.commit()
+            
+            keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]])
+            await update.message.reply_text(f'`{report}`', reply_markup=keyboard, parse_mode='Markdown')
+
             updated_user = get_or_create_user(user_id)
             await update.message.reply_text(
                 f"✅ **Search Complete**\n"
                 f"💰 Remaining credits: {updated_user['credits']}",
                 parse_mode='Markdown'
             )
+        else: # Group
+            increment_group_usage_db(user_id)
+            
+            keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("Contact Developer", url="https://t.me/HIDANCODE")]])
+            await update.message.reply_text(f'`{report}`', reply_markup=keyboard, parse_mode='Markdown')
+
+            with db_lock:
+                cursor.execute('SELECT daily_searches FROM users WHERE user_id = ?', (user_id,))
+                db_user = cursor.fetchone()
+            if db_user:
+                remaining = Config.DAILY_FREE_SEARCHES - db_user['daily_searches']
+                await update.message.reply_text(
+                    f"✅ **Search Complete**\n"
+                    f"📊 Remaining searches today: {remaining}/{Config.DAILY_FREE_SEARCHES}",
+                    parse_mode='Markdown'
+                )
     else:
         await processing_msg.edit_text(
-            "❌ **Search Failed**\n"
-            "No data found for this number or API error occurred.\n"
-            "Please try again later.",
+            "❌ **Search Failed**\nNo data found for this vehicle number or API error occurred.",
             parse_mode='Markdown'
         )
 
@@ -889,6 +1099,10 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_main_menu(update, context)
     elif data == "start_lookup":
         await start_lookup_callback(update, context)
+    elif data == "lookup_phone":
+        await lookup_phone_callback(update, context)
+    elif data == "lookup_vehicle":
+        await lookup_vehicle_callback(update, context)
     elif data == "my_credits":
         await show_credits_callback(update, context)
     elif data == "redeem_code":
@@ -954,7 +1168,7 @@ async def verify_membership_callback(update: Update, context: ContextTypes.DEFAU
     if await check_channel_membership(context, user_id):
         await query.edit_message_text(
             "✅ **Membership Verified!**\n"
-            "You can now use the bot by sending a 10-digit phone number.",
+            "You can now use all the bot\'s lookup features.",
             parse_mode='Markdown'
         )
     else:
@@ -965,6 +1179,7 @@ async def verify_membership_callback(update: Update, context: ContextTypes.DEFAU
             parse_mode='Markdown'
         )
 
+@callback_membership_required
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show main menu"""
     query = update.callback_query
@@ -985,18 +1200,41 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode='Markdown'
     )
 
+@callback_membership_required
 async def start_lookup_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle start lookup callback"""
+    """Shows the lookup type selection menu."""
     query = update.callback_query
     await query.edit_message_text(
-        "🔍 **Phone Number Lookup**\n\n"
-        "📱 Send a 10-digit phone number to search.\n"
-        f"💰 Cost: {Config.PRIVATE_SEARCH_COST} credit per search\n\n"
-        "Example: `9876543210`",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Back to Menu", callback_data="main_menu")]]),
-        parse_mode='Markdown'
+        text="<b>Please choose the type of lookup you want to perform:</b>",
+        reply_markup=lookup_menu_keyboard(),
+        parse_mode='HTML'
     )
 
+@callback_membership_required
+async def lookup_phone_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handles the 'Number Lookup' button, prompting for a phone number."""
+    query = update.callback_query
+    user_id = query.from_user.id
+    set_user_state(user_id, "waiting_phone_number")
+    await query.edit_message_text(
+        "<b>Enter a 10-digit phone number to search.</b>",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="main_menu")]]),
+        parse_mode='HTML'
+    )
+
+@callback_membership_required
+async def lookup_vehicle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handles the 'Vehicle Lookup' button, prompting for a vehicle number."""
+    query = update.callback_query
+    user_id = query.from_user.id
+    set_user_state(user_id, "waiting_vehicle_number")
+    await query.edit_message_text(
+        "<b>Enter a vehicle number to search, prefixed with a dot.</b>\n" 
+        "Example: <code>.JH01CW0229</code>",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="main_menu")]])
+    )
+
+@callback_membership_required
 async def show_credits_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show user credits"""
     query = update.callback_query
@@ -1017,6 +1255,7 @@ async def show_credits_callback(update: Update, context: ContextTypes.DEFAULT_TY
         parse_mode='Markdown'
     )
 
+@callback_membership_required
 async def redeem_code_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle redeem code callback"""
     query = update.callback_query
@@ -1033,6 +1272,7 @@ async def redeem_code_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         parse_mode='Markdown'
     )
 
+@callback_membership_required
 async def refer_friends_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show referral information"""
     query = update.callback_query
@@ -1055,6 +1295,7 @@ async def refer_friends_callback(update: Update, context: ContextTypes.DEFAULT_T
         parse_mode='Markdown'
     )
 
+@callback_membership_required
 async def my_stats_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show user statistics"""
     query = update.callback_query
@@ -1086,6 +1327,7 @@ async def my_stats_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode='Markdown'
     )
 
+@callback_membership_required
 async def how_it_works_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show how it works information (from ym2.py.txt)"""
     query = update.callback_query
@@ -1097,8 +1339,7 @@ async def how_it_works_callback(update: Update, context: ContextTypes.DEFAULT_TY
         f"- Earn credits by inviting friends ({Config.REFERRAL_BONUS} per referral) or redeeming codes.\n\n"
         "**In Authorized Groups:**\n"
         f"- You get {Config.DAILY_FREE_SEARCHES} free searches per day.\n"
-        "- Channel membership is required to use the bot in groups.\n\n"
-        "Send a 10-digit phone number to start a search!",
+        "- Channel membership is required to use the bot in groups.\n\n"        "Send a 10-digit phone number or a vehicle number (e.g., `.JH01CW0229`) to start a search!",
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Back to Menu", callback_data="main_menu")]]),
         parse_mode='Markdown'
     )
@@ -1423,7 +1664,6 @@ async def admin_stats_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         f"🔍 Total Searches: {total_searches}\n"
         f"💰 Total Credits: {total_credits:.2f}\n"
         f"🎟 Active Codes: {active_codes}\n"
-        f"👑 Pro Users: {len(pro_users)}\n"
         f"🚫 Banned Users: {banned_users}\n"
         f"✅ Verified Users: {verified_users}\n"
         f"👨‍💻 Admin Users: {admin_users}\n"
@@ -1525,42 +1765,65 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
     """Handle text messages based on user state"""
     user_id = update.effective_user.id
     message_text = update.message.text.strip()
-    
-    # Check if it's a phone number first
-    if message_text.isdigit() and len(message_text) == 10:
-        await handle_phone_number(update, context)
-        return
-    
-    # Check user state for other text inputs
+    chat_type = update.effective_chat.type
+
     state_data = get_user_state(user_id)
-    if not state_data:
-        return
+    state = state_data['state'] if state_data else None
+
+    # Vehicle Number Logic
+    if message_text.startswith('.'):
+        vehicle_number = message_text[1:].strip().upper()
+        if vehicle_number:
+            # In groups, process directly. In DMs, only if requested.
+            if chat_type != 'private' or state == 'waiting_vehicle_number':
+                if state == 'waiting_vehicle_number': clear_user_state(user_id)
+                await handle_vehicle_number(update, context, vehicle_number)
+                return
     
-    state = state_data['state']
-    data = state_data['data']
-    
-    if state == "waiting_redeem_code":
-        await handle_redeem_code_input(update, context, message_text)
-    elif state == "admin_gen_code":
-        await handle_admin_gen_code_input(update, context, message_text)
-    elif state == "admin_broadcast":
-        await handle_admin_broadcast_input(update, context, message_text)
-    elif state == "waiting_setting_value": # New from ym2.py.txt
-        await handle_setting_value_input(update, context, message_text, data)
-    elif state == "waiting_group_id": # New from ym2.py.txt
-        await handle_add_group_input(update, context, message_text)
-    elif state == "waiting_channel_username": # New from ym2.py.txt
-        await handle_add_channel_input(update, context, message_text)
-    elif state == "waiting_ban_user_id": # New from ym2.py.txt
-        await handle_ban_user_input(update, context, message_text)
-    elif state == "waiting_unban_user_id": # New from ym2.py.txt
-        await handle_unban_user_input(update, context, message_text)
-    elif state == "waiting_admin_id":
-        await handle_admin_id_input(update, context, message_text)
+    # Phone Number Logic
+    if message_text.isdigit() and len(message_text) == 10:
+        # In groups, process directly. In DMs, only if requested.
+        if chat_type != 'private' or state == 'waiting_phone_number':
+            if state == 'waiting_phone_number': clear_user_state(user_id)
+            await handle_phone_number(update, context)
+            return
+
+    # State-based handlers for other inputs (redeem code, etc.)
+    if state:
+        if state == "waiting_redeem_code":
+            await handle_redeem_code_input(update, context, message_text)
+        elif state == "admin_gen_code":
+            await handle_admin_gen_code_input(update, context, message_text)
+        elif state == "admin_broadcast":
+            await handle_admin_broadcast_input(update, context, message_text)
+        elif state == "waiting_setting_value": # New from ym2.py.txt
+            await handle_setting_value_input(update, context, message_text, state_data['data'])
+        elif state == "waiting_group_id": # New from ym2.py.txt
+            await handle_add_group_input(update, context, message_text)
+        elif state == "waiting_channel_username": # New from ym2.py.txt
+            await handle_add_channel_input(update, context, message_text)
+        elif state == "waiting_ban_user_id": # New from ym2.py.txt
+            await handle_ban_user_input(update, context, message_text)
+        elif state == "waiting_unban_user_id": # New from ym2.py.txt
+            await handle_unban_user_input(update, context, message_text)
+        elif state == "waiting_admin_id":
+            await handle_admin_id_input(update, context, message_text)
 
 async def handle_redeem_code_input(update: Update, context: ContextTypes.DEFAULT_TYPE, code: str):
     """Handle redeem code input"""
     user_id = update.effective_user.id
+
+    if not await check_channel_membership(context, user_id):
+        keyboard = create_join_keyboard()
+        await update.message.reply_text(
+            "🔒 **Channel Membership Required**\n\n"
+            "Please join all required channels to redeem codes.",
+            reply_markup=keyboard,
+            parse_mode='Markdown'
+        )
+        clear_user_state(user_id)
+        return
+
     clear_user_state(user_id)
     
     with db_lock:
@@ -2028,9 +2291,6 @@ This bot is for educational purposes only."""
 
 def main():
     """Main function to run the bot"""
-    # Load pro users
-    load_pro_users()
-
     # Start Flask app in a separate thread
     flask_thread = threading.Thread(target=run_flask_app)
     flask_thread.daemon = True # Allow main program to exit even if thread is still running
@@ -2043,7 +2303,6 @@ def main():
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("admin", admin_command))
-    application.add_handler(CommandHandler("bm2", add_pro_user))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_messages))
     application.add_handler(CallbackQueryHandler(callback_handler))
     
@@ -2052,5 +2311,6 @@ def main():
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == '__main__':
+    load_settings()
     main()
 
