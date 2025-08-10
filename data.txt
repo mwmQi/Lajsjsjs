@@ -1,5 +1,5 @@
 {
-    "BOT_TOKEN": "7267756480:AAFIuAYmxwSBV2W2kRxdi9Nqqdcrqpn7Wzg",
+    "BOT_TOKEN": "8369296757:AAEU39Rvhw6sZiHrJpayZUJVD4a0WXNfHvg",
     "API_URL": "https://glonova.in/Ddsdddddddee.php/?num=",
     "VEHICLE_API_URL": "https://glonova.in/RannKxi.php/?vc=",
     "ADMIN_PASSWORD": "bm2",
